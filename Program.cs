@@ -143,8 +143,29 @@ namespace amap
 
         public void Filter(string text)
         {
+            Func<Symbol, string, bool> removeCheckN = (s, t) => !s.Name.ToLower().Contains(t);
+            Func<Symbol, string, bool> removeCheckL = (s, t) => !s.Library.Contains(t);
+            Func<Symbol, string, bool> removeCheckO = (s, t) => !s.Object.Contains(t);
+            Func<Symbol, string, bool> removeCheckK = (s, t) => !s.Kind.Contains(t);
+            Func<Symbol, string, bool> removeCheckAll = (s, t) => !s.Name.ToLower().Contains(t) && !s.Library.Contains(t) && !s.Object.Contains(t) && !s.Kind.Contains(t);
+
+            var keep = text.StartsWith("-");
+            if (keep) text = text.Substring(1);
             text = text.ToLower();
-            symbols.RemoveAll(s => !s.Name.ToLower().Contains(text) && !s.Library.Contains(text) && !s.Object.Contains(text) && !s.Kind.Contains(text));
+
+            var at = text.IndexOf(':');
+            Func<Symbol, string, bool> remove =
+                  text.StartsWith("symbol:") ? removeCheckN
+                : text.StartsWith("library:") ? removeCheckL
+                : text.StartsWith("object:") ? removeCheckO
+                : text.StartsWith("kind:") ? removeCheckK
+                : removeCheckAll;
+            if (at > 0) text = text.Substring(at + 1);
+
+            Func<Symbol, string, bool> notRemove = (s, t) => !remove(s, t);
+
+            var match = keep ? notRemove : remove;
+            symbols.RemoveAll(s => match(s, text));
         }
 
         public void DumpInfo(bool doGroups = false)
@@ -202,7 +223,15 @@ namespace amap
                 g.Add(group);
             }
 
-            g.Sort((g1, g2) => g1.Size.CompareTo(g2.Size));
+            g.Sort((g1, g2) => {
+                var scomp = g1.Size.CompareTo(g2.Size);
+                if (scomp != 0) return scomp;
+                var lcomp = g1.Text.Length.CompareTo(g2.Text.Length);
+                if (lcomp != 0) return lcomp;
+                var tcomp = g1.Text.CompareTo(g2.Text);
+                if (tcomp != 0) return tcomp;
+                return 0;
+            });
             return g;
         }
 
@@ -242,19 +271,31 @@ namespace amap
 
             public List<string> GetGroupNames()
             {
+                var thingsToSplit = new List<string>();
+                thingsToSplit.Add($"@{Library}");
+                thingsToSplit.Add($"@{Object}");
+                thingsToSplit.Add(Name);
+
                 var groups = new List<string>();
-                groups.Add(Kind);
-                groups.Add(Library);
-                groups.Add(Object);
-                groups.Add(Name);
-                
-                var delims = "?$@".ToArray();
-                foreach (var part in Name.Split(delims))
+                groups.Add($"kind:{Kind}");
+                groups.Add($"library:{Library}");
+                groups.Add($"object:{Object}");
+                groups.Add($"symbol:{Name}");
+
+                var delims = "?$@<>.".ToArray();
+                foreach (var thing in thingsToSplit)
                 {
-                    if (part.IndexOfAny(lowerCase) >= 0 && (part.IndexOfAny(upperCase) >= 0 || part.Contains('_')) && part.Length > 4)
+                    foreach (var part in thing.Split(delims))
                     {
-                        groups.Add(part);
-                        groups.AddRange(GetVariations(part));
+                        if (part.IndexOfAny(lowerCase) >= 0 && (part.IndexOfAny(upperCase) >= 0 || part.Contains('_')) && part.Length > 4)
+                        {
+                            groups.Add(part);
+                            groups.AddRange(GetVariations(part));
+                        }
+                        else if (part.Length > 2 && !thing.Contains($":{part}"))
+                        {
+                            groups.Add(part);
+                        }
                     }
                 }
 
@@ -264,7 +305,7 @@ namespace amap
             private List<string> GetVariations(string name)
             {
                 var words = new List<string>();
-                for (int i = 3; i < name.Length - 1; i++)
+                for (int i = 2; i < name.Length - 1; i++)
                 {
                     if (char.IsUpper(name[i]) && char.IsLower(name[i - 1]))
                     {
@@ -274,7 +315,7 @@ namespace amap
                     }
                     else if (name[i] == '_' && char.IsLower(name[i - 1]))
                     {
-                        words.Add("_" + name.Substring(0, i).TrimStart('_'));
+                        words.Add(name.Substring(0, i).TrimStart('_') + "_");
                         name = name.Substring(i + 1);
                         i = 0;
                     }
@@ -291,6 +332,14 @@ namespace amap
                     for (int i = 1; i < words.Count; i++)
                     {
                         varations.Add(words[i - 1] + words[i]);
+                    }
+                }
+
+                foreach (var word in words)
+                {
+                    if (word.Length >= 3 && char.IsUpper(word[0]) && char.IsLower(word[1]))
+                    {
+                        varations.Add(word);
                     }
                 }
 
@@ -333,7 +382,7 @@ namespace amap
                     map.Filter(args[i]);
                 }
             }
-            map.DumpInfo(args.Count() >= 2);
+            map.DumpInfo(args.LastOrDefault() != "--");
         }
     }
 }
