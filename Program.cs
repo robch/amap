@@ -168,22 +168,40 @@ namespace amap
             symbols.RemoveAll(s => match(s, text));
         }
 
-        public void DumpInfo(bool doGroups = false)
+        public void DumpInfo(bool outputSymbolsObjectsLibrariesKind, bool outputUnigramBigrams, bool outputMapDump, List<string> finalFilters, int tail)
         {
-            Console.WriteLine("Size\tShared\tName\tBase\tObject\tLibrary\tKind");
-            foreach (var s in symbols)
+            List<string> output = new List<string>();
+
+            if (outputMapDump)
             {
-                Console.WriteLine($"{s.Size}\t{s.Shared}\t{s.Name}\t{s.Base}\t{s.Object}\t{s.Library}\t{s.Kind}");
+                output.Add("Size\tShared\tName\tBase\tObject\tLibrary\tKind");
+                foreach (var s in symbols)
+                {
+                    output.Add($"{s.Size}\t{s.Shared}\t{s.Name}\t{s.Base}\t{s.Object}\t{s.Library}\t{s.Kind}");
+                }
             }
 
-            if (doGroups)
+            if (outputSymbolsObjectsLibrariesKind || outputUnigramBigrams)
             { 
                 PrepareGroups();
-                Console.WriteLine("\nSize\tSymbols\tUnique\tGroup");
+                output.Add("\nSize\tSymbols\tUnique\tGroup");
                 foreach (var g in GetGroups())
                 {
-                    Console.WriteLine($"{g.Size}\t{g.Symbols.Count()}\t{g.Unique}\t{g.Text}");
+                    var unigramOrBigram = !g.Text.Contains(":");
+                    var doit = (outputUnigramBigrams && unigramOrBigram) || (outputSymbolsObjectsLibrariesKind && !unigramOrBigram);
+                    if (doit) output.Add($"{g.Size}\t{g.Symbols.Count()}\t{g.Unique}\t{g.Text}");
                 }
+            }
+
+            if (finalFilters.Count > 0)
+            {
+                output.RemoveAll(line => finalFilters.Count(filter => line.Contains(filter)) == 0);
+            }
+
+            if (output.Count > tail) output.RemoveRange(0, output.Count - tail);
+            foreach (var line in output)
+            {
+                Console.WriteLine(line);
             }
         }
 
@@ -371,18 +389,47 @@ namespace amap
 
     class Program
     {
-        static void Main(string[] args)
+        static int Main(string[] args)
         {
             var map = new MapData();
-            map.LoadMap(args.Count() >= 1 ? args[0] : "");
+            if (args.Count() == 0)
+            {
+                Console.WriteLine(
+                    "amap filename.map [[-]filter1 [[-]filter2 ...]] [+/++/-] [,TAIL]\n" +
+                    "\n" +
+                    "   (default)  output symbols, objects, libraries, and kind\n" +
+                    "\n" +
+                    "       +      output symbols, objects, libraries, and kind + unigram and bigram analysis + \n" +
+                    "       ++     output symbols, objects, libraries, and kind + unigram and bigram analysis + map dump\n" +
+                    "       -      output only unigram and bigram analysis\n" +
+                    "       --     output only map dump\n"
+                );
+                return 1;
+            }
+
+            var finalFilters = new List<string>();
+            var outputSymbolsObjectsLibrariesKind = true;
+            var outputUnigramBigrams = false;
+            var outputMapDump = false;
+            var tail = int.MaxValue;
+
+            map.LoadMap(args[0]);
             for (int i = 1; i < args.Count(); i++)
             {
-                if (args[i].ToLower() != "true")
-                {
-                    map.Filter(args[i]);
-                }
+                var arg = args[i];
+                if (arg == "+") { outputUnigramBigrams = true; continue; }
+                if (arg == "++") { outputUnigramBigrams = true; outputMapDump = true; continue; }
+                if (arg == "-") { outputSymbolsObjectsLibrariesKind = false; outputUnigramBigrams = true; continue; }
+                if (arg == "--")  { outputSymbolsObjectsLibrariesKind = false; outputMapDump = true; continue; }
+                if (arg.StartsWith(",")) { tail = int.Parse(arg.Substring(1)); continue; }
+                if (arg.EndsWith(":")) { finalFilters.Add(arg); continue; }
+
+                map.Filter(args[i]);
             }
-            map.DumpInfo(args.LastOrDefault() != "--");
+
+            map.DumpInfo(outputSymbolsObjectsLibrariesKind, outputUnigramBigrams, outputMapDump, finalFilters, tail);
+
+            return 0;
         }
     }
 }
